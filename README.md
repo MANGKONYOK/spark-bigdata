@@ -142,9 +142,6 @@ The pipeline includes automated unit assertions:
 
 #### Execution Instructions
 1. Clone the repository and navigate to the project directory:
-   ```powershell
-   cd "c:\Users\KITTIPHAT NOIKATE\Desktop\spark-bigdata"
-   ```
 2. Open the notebook in VS Code or JupyterLab:
    - [Lab7_Part1.ipynb](file:///c:/Users/KITTIPHAT%20NOIKATE/Desktop/spark-bigdata/Lab7_Part1.ipynb)
 3. Ensure the Jupyter kernel uses your installed Python environment.
