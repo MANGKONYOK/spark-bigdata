@@ -1,0 +1,8 @@
+# Spark (4.x needs JDK 17 or 21)
+pyspark==4.2.0
+# DataFrame -> pandas in the Lab 2 tutorial; PySpark 4.2 does not fully support pandas 3 yet
+pandas>=2.0.0,<3.0.0
+# Better PySpark shuffle spilling (silences a worker warning)
+psutil>=5.9.0
+# Tests
+pytest>=8.0.0

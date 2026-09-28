@@ -4,13 +4,13 @@
 
 This lab focuses on distributed semi-structured log processing, statistical outlier analysis, and fault detection using pure **Apache Spark Core Resilient Distributed Datasets (RDD)** APIs.
 
-Notebook implementation: [Lab7_Part1.ipynb](file:///c:/Users/KITTIPHAT%20NOIKATE/Desktop/spark-bigdata/Lab7_Part1.ipynb)
+Notebook implementation: [Lab7_Part1.ipynb](Lab7_Part1.ipynb)
 
 ---
 
 ### 1. Overview & Dataset Specification
 
-The analysis processes Apache Spark cluster execution logs ([spark.log](file:///c:/Users/KITTIPHAT%20NOIKATE/Desktop/spark-bigdata/spark.log)), capturing internal driver, executor, and storage manager lifecycle events:
+The analysis processes Apache Spark cluster execution logs ([spark.log](spark.log)), capturing internal driver, executor, and storage manager lifecycle events:
 - **Total Ingested Records:** 2,000 raw lines
 - **Data Format:** Semi-structured space-delimited text
 
@@ -46,8 +46,9 @@ flowchart TD
     F2 -->|Tukey's Fences Filter| F3["Outlier Isolation & Classification"]
 
     D -->|Deliverable 1.3| G["executor.Executor Isolation"]
-    G -->|filter loss keywords| G1["fault_rdd"]
-    G1 -->|regex incident parser| G2["Lost Tasks & Stages Categorization"]
+    G -->|filter loss keywords| G1["fault_rdd (0 explicit failure lines)"]
+    G -->|parse Running / Finished task| G3["(tid, event) Pair RDD"]
+    G3 -->|subtractByKey finished from started| G2["Lost Tasks & Stages"]
 ```
 
 #### Core Design Decisions:
@@ -97,25 +98,26 @@ Performs in-depth operational analysis on `python.PythonRunner` logs.
 2. **Metric B: Task Execution Duration (ms)**:
    - Extracted via regex `total\s*=\s*(-?\d+)`.
    - Sample Size ($N$): **375** observations.
-   - Range: **18 ms** (minimum) to **629 ms** (maximum).
-   - Arithmetic Mean: **144.13 ms** | Standard Deviation: **106.66 ms** | Variance: **11,377.30 ms²**.
+   - Range: **37 ms** (minimum) to **1114 ms** (maximum).
+   - Arithmetic Mean: **55.66 ms** | Standard Deviation: **119.56 ms** | Variance: **14,295.63 ms²**.
 3. **Pure RDD Distributed Quartile & Tukey's Outlier Bounds**:
    - Computed without shifting data into pandas/DataFrames via `sortBy().zipWithIndex()`.
-   - **First Quartile ($Q1$, 25th percentile):** `78 ms`
-   - **Third Quartile ($Q3$, 75th percentile):** `174 ms`
-   - **Interquartile Range ($IQR$):** `96 ms`
-   - **Lower Tukey Fence ($Q1 - 1.5 \times IQR$):** `-66.00 ms` (clamped at 0 ms)
-   - **Upper Tukey Fence ($Q3 + 1.5 \times IQR$):** `318.00 ms`
-   - **Outliers Detected:** **23 records (6.13%)**
-   - **Classification:** Values $> 500\text{ ms}$ represent cold-start process boot latencies; values between $318\text{ ms}$ and $500\text{ ms}$ identify garbage collection pauses and CPU contention.
+   - **First Quartile ($Q1$, 25th percentile):** `39 ms`
+   - **Third Quartile ($Q3$, 75th percentile):** `42 ms`
+   - **Interquartile Range ($IQR$):** `3 ms`
+   - **Lower Tukey Fence ($Q1 - 1.5 \times IQR$):** `34.50 ms`
+   - **Upper Tukey Fence ($Q3 + 1.5 \times IQR$):** `46.50 ms`
+   - **Outliers Detected:** **46 records (12.27%)**
+   - **Classification:** the 5 values $> 500\text{ ms}$ (1072–1114 ms) are cold-start process boots, the first Python workers of stage 0. The other 41 (47–108 ms) are mild: the IQR is only 3 ms, so the fences are tight.
 
 ---
 
 #### Deliverable 1.3: Fault Detection Engine (Lost Tasks & Stages)
 Extracts, structures, and categorizes failure signals originating from `executor.Executor`.
 
-- **Log File Baseline:** All 606 executor tasks in `spark.log` completed successfully with **0 lost tasks or stages** in the primary dataset.
-- **Incident Verification Testbed:** Benchmarked against a synthetic test RDD simulating all canonical failure scenarios:
+- **Explicit failure lines:** the log has no `Lost task`, `Stage lost` or `FetchFailed` line.
+- **Started vs finished:** 305 tasks started and 300 finished (`started.subtractByKey(finished)` by TID), so **5 tasks were lost**: TIDs 1350–1354 (tasks 30.0–34.0), all in **stage 29.0**, the only stage that did not complete (35 started, 30 finished). The log ends at 20:11:11 right after task 34.0 starts, with no error, which points to the executor being stopped or its log being cut off.
+- **Incident Verification Testbed:** the keyword parser is also benchmarked against a synthetic test RDD simulating the canonical failure scenarios:
   1. `TASK_LOST`: Shuffle connection timeouts (`FetchFailedException`).
   2. `TASK_LOST`: Driver/Executor heap exhaustion (`OutOfMemoryError: Java heap space`).
   3. `STAGE_LOST`: Cascading stage cancellations triggered by upstream shuffle partition loss.
@@ -130,21 +132,77 @@ The pipeline includes automated unit assertions:
 - **Test 1 (Corrupted Record Defense):** Ingests malformed entries (empty strings, comments, truncated lines, invalid log levels). Safely rejected 6 malformed entries while accepting exactly 1 valid record with zero unhandled worker exceptions.
 - **Test 2 (Zero-Division & Edge-Case Guard):** Validates summary statistics calculation across empty RDDs (`sc.emptyRDD()`) and single-element collections (`N=1`), ensuring graceful fallback without divide-by-zero errors.
 - **Test 3 (Totals Reconciliation):** Asserts that the sum of frequency aggregations ($\sum \text{counts} = 2,000$) reconciles perfectly with the total valid record count, ensuring zero record loss during shuffle operations.
+- **Test 4 (Task Accounting):** Asserts that started tasks = finished + lost (305 = 300 + 5).
 
 ---
 
 ### 5. Running the Lab
 
 #### Prerequisites
-- **Python:** 3.10, 3.11, or 3.12
+- **Python:** 3.10 – 3.14 (verified on 3.14.6)
 - **Java:** JDK 17, 21, or 25
 - **PySpark:** `pyspark >= 3.5.0` (Verified on PySpark 4.2.0)
 
 #### Execution Instructions
 1. Clone the repository and navigate to the project directory:
 2. Open the notebook in VS Code or JupyterLab:
-   - [Lab7_Part1.ipynb](file:///c:/Users/KITTIPHAT%20NOIKATE/Desktop/spark-bigdata/Lab7_Part1.ipynb)
+   - [Lab7_Part1.ipynb](Lab7_Part1.ipynb)
 3. Ensure the Jupyter kernel uses your installed Python environment.
 4. Execute cells sequentially (`Run All`).
 
 > **Windows Worker Tip:** On Windows systems with Python 3.12+, sampling records with `.collect()[:n]` avoids premature socket resets caused by driver early-termination in simple worker mode.
+
+---
+
+## Lab 2: House Prices with Spark DataFrames
+
+Notebook implementation: [Lab7_Part2.ipynb](Lab7_Part2.ipynb)
+
+The house data is split across two branches, and each branch keeps one house in two files, a Gov file and a House file, linked by `Id` (`lab+files+and+datasets/Branch{1,2}_{Gov,House}Dataset.csv`). Each branch is joined on `Id`, then the branches are stacked with `unionByName`, giving 1460 houses. `spark.read.csv` reads every column as text, so the numeric columns are cast first.
+
+### Q1: Pricing Summary per MSZoning
+
+`groupBy("MSZoning")` with one `agg`. Every house is kept (no `dropna()`), because `avg` already skips the 259 missing `LotFrontage` values; averages are cast to `decimal(10,2)` so they always print 2 decimals.
+
+| MSZoning | n | avg_price | max_price | min_price | avg_lot |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| FV | 65 | 214014.06 | 370878 | 144152 | 59.49 |
+| RL | 1151 | 191004.99 | 755000 | 39300 | 74.68 |
+| RH | 16 | 131558.38 | 200000 | 76000 | 58.92 |
+| RM | 218 | 126316.83 | 475000 | 37900 | 52.37 |
+| C (all) | 10 | 74528.00 | 133900 | 34900 | 69.70 |
+
+### Q2: Top 5 Price per Square Foot
+
+`TotalArea = TotalBsmtSF + 1stFlrSF + 2ndFlrSF`, `PricePerSqft = round(SalePrice / TotalArea, 2)`, Normal sales only. Without that filter, Partial sales 689, 899 and 804 (new houses sold before they were finished) take over the top 5.
+
+| Id | MSZoning | YearBuilt | SalePrice | TotalArea | PricePerSqft |
+| ---: | :--- | ---: | ---: | ---: | ---: |
+| 533 | RL | 1955 | 107500 | 827 | 129.99 |
+| 393 | RL | 1959 | 106500 | 882 | 120.75 |
+| 534 | RL | 1946 | 39300 | 334 | 117.66 |
+| 186 | RM | 1892 | 475000 | 4143 | 114.65 |
+| 873 | RL | 1953 | 116000 | 1015 | 114.29 |
+
+Two cells of the original Lab 2 tutorial fail under Spark 4 ANSI mode and are adjusted in the notebook: casting `'65.0'` straight to `integer` (cast through `double`), and adding string columns (cast to `int` first).
+
+---
+
+## Scripts and Tests
+
+The same analysis is also packaged as scripts, and the last cell of `Lab7_Part2.ipynb` checks that notebook and script agree.
+
+| File | Does |
+| --- | --- |
+| `src/log_analytics.py` | Lab 1 Q1–Q3 on `spark.log` with RDDs |
+| `src/house_analytics.py` | Lab 2 Q1–Q2 on the house datasets with DataFrames |
+| `tests/` | 19 `pytest` tests: small made-up data with hand-worked answers, and the real data |
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python src/log_analytics.py
+python src/house_analytics.py
+python -m pytest -q tests
+```
